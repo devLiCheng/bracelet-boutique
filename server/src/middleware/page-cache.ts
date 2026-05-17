@@ -39,20 +39,36 @@ export async function preRenderAllPages(): Promise<void> {
       htmlCache.set(`/|${lang}`, { html: homeHtml, etag: hashStr(homeHtml) });
       htmlCache.set(`/zh|${lang}`, { html: homeHtml, etag: hashStr(homeHtml) }); // alias
 
-      // --- SHOP ---
-      const catFilters = categories.map((cat: any) => `<a href="/shop?lang=${lang}&category=${cat.slug}" class="btn bsm" style="text-decoration:none;background:transparent;color:var(--p);border:2px solid var(--p);margin:0">${lang==='zh'?cat.name_zh:cat.name_en}</a>`).join('');
+      // --- SHOP (all products) ---
+      const renderCatFilters = (activeSlug: string) => `<a href="/shop?lang=${lang}" class="btn bsm" style="text-decoration:none;${!activeSlug?'background:var(--p);color:#fff;':'background:transparent;color:var(--p);border:2px solid var(--p);'}margin:0 4px 4px 0">${_('nav.shop')}</a>` + categories.map((cat: any) => `<a href="/shop?lang=${lang}&category=${cat.slug}" class="btn bsm" style="text-decoration:none;${cat.slug===activeSlug?'background:var(--p);color:#fff;':'background:transparent;color:var(--p);border:2px solid var(--p);'}margin:0 4px 4px 0">${lang==='zh'?cat.name_zh:cat.name_en}</a>`).join('');
+
       const allProductCards = products.map((p: any) => renderProductCard(p, lang));
 
       const shopHtml = layout({ lang, title: _('seo.shop_title'), description: _('seo.shop_desc'), currentPath: '/shop', children: `
 <div class="c"><div class="bc"><a href="/?lang=${lang}">${_('nav.home')}</a> / <span>${_('nav.shop')}</span></div></div>
-<section class="s" style="padding-top:0"><div class="c"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:32px"><a href="/shop?lang=${lang}" class="btn bp bsm" style="text-decoration:none">${_('nav.shop')}</a>${catFilters}</div><div class="pg">${allProductCards}</div></div></section>` });
+<section class="s" style="padding-top:0"><div class="c"><div style="display:flex;gap:0;flex-wrap:wrap;margin-bottom:32px">${renderCatFilters('')}</div><div class="pg">${allProductCards}</div></div></section>` });
       htmlCache.set(`/shop|${lang}`, { html: shopHtml, etag: hashStr(shopHtml) });
+
+      // --- SHOP (per-category pages) ---
+      for (const cat of categories) {
+        const catProducts = products.filter((p: any) => p.category_id === cat.id);
+        const catCards = catProducts.map((p: any) => renderProductCard(p, lang));
+        const catShopHtml = layout({ lang, title: `${lang==='zh'?cat.name_zh:cat.name_en} - ${_('site.name')}`, description: lang==='zh'?cat.description_zh:cat.description_en, currentPath: '/shop', children: `
+<div class="c"><div class="bc"><a href="/?lang=${lang}">${_('nav.home')}</a> / <span>${lang==='zh'?cat.name_zh:cat.name_en}</span></div></div>
+<section class="s" style="padding-top:0"><div class="c"><div style="display:flex;gap:0;flex-wrap:wrap;margin-bottom:32px">${renderCatFilters(cat.slug)}</div>${catCards.length?`<div class="pg">${catCards}</div>`:`<div style="text-align:center;padding:60px 0"><p style="font-size:1.2rem">${_('common.no_results')}</p><a href="/shop?lang=${lang}" class="btn bo" style="margin-top:16px">${_('common.view_all')}</a></div>`}</div></section>` });
+        htmlCache.set(`/shop?category=${cat.slug}|${lang}`, { html: catShopHtml, etag: hashStr(catShopHtml) });
+      }
+
+      // --- PRODUCT DETAIL PAGES ---
+      // --- Pre-load images & reviews for all products ---
+      const [allImages] = await pool.query('SELECT * FROM product_images ORDER BY sort_order') as any;
+      const [allReviews] = await pool.query('SELECT * FROM reviews WHERE is_approved = 1 ORDER BY created_at DESC') as any;
 
       // --- PRODUCT DETAIL PAGES ---
       for (const p of products) {
-        const pImages = cache.get<any[]>(`db:images:${p.id}`) || [];
-        const pReviews = cache.get<any[]>(`db:reviews:${p.id}`) || [];
-        const pRelated = cache.get<any[]>(`db:related:${p.category_id}:${p.id}`) || [];
+        const pImages = allImages.filter((img: any) => img.product_id === p.id);
+        const pReviews = allReviews.filter((rev: any) => rev.product_id === p.id).slice(0, 10);
+        const pRelated = products.filter((rp: any) => rp.category_id === p.category_id && rp.id !== p.id).slice(0, 4);
 
         const mainImage = pImages[0]?.image_url || `https://placehold.co/800x800/7C3AED/FFFFFF?text=${encodeURIComponent(p.name_en)}`;
         const thumbs = pImages.map((img: any) => `<img src="${img.image_url}" alt="${lang==='zh'?img.alt_zh:img.alt_en}" style="width:72px;height:72px;border-radius:8px;object-fit:cover;cursor:pointer;border:2px solid var(--b)" onmouseover="document.getElementById('mi').src=this.src" loading="lazy">`).join('');

@@ -36,7 +36,13 @@ app.get('/', async (c) => {
 
 app.get('/shop', async (c) => {
   const lang = c.get('lang') as string;
-  const cached = getCachedPage(`/shop|${lang}`);
+  const category = c.req.query('category');
+  const cacheKey = category ? `/shop?category=${category}|${lang}` : `/shop|${lang}`;
+  let cached = getCachedPage(cacheKey);
+  // Fallback to all-products shop if category page not found
+  if (!cached && category) {
+    cached = getCachedPage(`/shop|${lang}`);
+  }
   if (cached) {
     c.header('ETag', cached.etag);
     if (c.req.header('If-None-Match') === cached.etag) return new Response(null, { status: 304 });
